@@ -7,6 +7,7 @@ import {
   launchMission,
   progressGame,
   rechargeFleet,
+  upgradeMuleCargo,
   type Delivery,
 } from './game'
 
@@ -162,5 +163,32 @@ describe('game loop', () => {
     expect(result.credits).toBe(game.credits - 120)
     expect(result.rovers[0].battery).toBeGreaterThan(40)
     expect(result.events[0].message).toContain('Смена завершена')
+  })
+
+  it('upgrades MULE cargo capacity to unlock the reserve container', () => {
+    const game = createInitialGame()
+    game.credits = 1000
+
+    const result = upgradeMuleCargo(game)
+    const mule = result.rovers.find((rover) => rover.id === 'rover-mule')!
+
+    expect(mule.capacity).toBe(90)
+    expect(result.credits).toBe(400)
+    expect(canLaunchMission(result, mule.id, 'order-impossible').ok).toBe(true)
+    expect(result.events[0].message).toContain('Грузовой модуль')
+  })
+
+  it('rejects the cargo upgrade when credits are insufficient', () => {
+    const game = createInitialGame()
+
+    expect(() => upgradeMuleCargo(game)).toThrow('Нужно 600 кредитов')
+  })
+
+  it('rejects the cargo upgrade after the expedition is over', () => {
+    const game = createInitialGame()
+    game.credits = 1000
+    game.day = game.maxDays + 1
+
+    expect(() => upgradeMuleCargo(game)).toThrow('Экспедиция завершена')
   })
 })

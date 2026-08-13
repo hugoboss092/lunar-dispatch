@@ -310,3 +310,21 @@ export function rechargeFleet(game: GameState): GameState {
   next.events.unshift(event(next.day, 'info', `Смена завершена. Сервис флота −${serviceCost} кр., батареи пополнены.`))
   return next
 }
+
+export function upgradeMuleCargo(game: GameState): GameState {
+  const next = clone(game)
+  const mule = next.rovers.find((rover) => rover.id === 'rover-mule')
+  const upgradeCost = 600
+
+  if (next.day > next.maxDays || next.rating <= 0) throw new Error('Экспедиция завершена')
+  if (!mule) throw new Error('МУЛ-03 не найден')
+  if (mule.capacity >= 90) throw new Error('Грузовой модуль уже установлен')
+  if (mule.status !== 'available') throw new Error('Для улучшения верните МУЛ-03 на базу')
+  if (next.credits < upgradeCost) throw new Error(`Нужно ${upgradeCost} кредитов`)
+
+  next.credits -= upgradeCost
+  mule.capacity = 90
+  mule.battery = Math.min(100, mule.battery + 20)
+  next.events.unshift(event(next.day, 'success', 'Грузовой модуль МУЛ-03 установлен: лимит 90 кг, резерв батареи +20%.'))
+  return next
+}

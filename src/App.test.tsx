@@ -13,5 +13,7 @@ describe('Lunar Dispatch interface', () => {
     expect(html).toContain('Медицинский рацион')
     expect(html).toContain('Принять смену')
     expect(html).toContain('Запустить доставку')
+    expect(html).toContain('Грузовой модуль XL')
+    expect(html).toContain('Нужно заработать ещё 200 кр.')
   })
 })

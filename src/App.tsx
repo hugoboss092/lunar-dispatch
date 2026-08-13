@@ -10,6 +10,8 @@ import {
   Crosshair,
   Flag,
   Gauge,
+  LockKeyhole,
+  PackagePlus,
   RotateCcw,
   Route,
   ShieldAlert,
@@ -25,6 +27,7 @@ import {
   launchMission,
   progressGame,
   rechargeFleet,
+  upgradeMuleCargo,
   type GameState,
   type Order,
   type RiskLevel,
@@ -115,7 +118,7 @@ function LunarMap({ game, selectedOrderId, onSelectOrder }: {
             onClick={() => onSelectOrder(order.id)}
             aria-label={`${order.title}, ${order.station}`}
           >
-            <span className="map-order__pin">{order.status === 'delivered' ? <Check size={16} /> : order.weight}</span>
+            <span className="map-order__pin"><span>{order.status === 'delivered' ? <Check size={16} /> : order.weight}</span></span>
             <span className="map-order__label">{order.station.replace(/[«»]/g, '')}</span>
           </button>
         ))}
@@ -233,6 +236,25 @@ function App() {
     setShowBriefing(true)
   }
 
+  function handleCargoUpgrade() {
+    try {
+      setGame((current) => upgradeMuleCargo(current))
+      setSelectedRoverId('rover-mule')
+    } catch {
+      // The workshop card explains the exact unmet requirement.
+    }
+  }
+
+  const mule = game.rovers.find((rover) => rover.id === 'rover-mule')!
+  const cargoUpgradeInstalled = mule.capacity >= 90
+  const cargoUpgradeAffordable = game.credits >= 600
+  const cargoUpgradeAvailable = !gameOver && !cargoUpgradeInstalled && cargoUpgradeAffordable && mule.status === 'available'
+  const cargoUpgradeHint = mule.status !== 'available'
+    ? 'Верните МУЛ-03 на базу для установки'
+    : !cargoUpgradeAffordable
+      ? `Нужно заработать ещё ${600 - game.credits} кр.`
+      : '68 → 90 кг · заряд при установке +20%'
+
   return (
     <main className="app-shell">
       <header className="topbar">
@@ -289,6 +311,22 @@ function App() {
                 const compatibility = canLaunchMission(game, rover.id, selectedOrder.id)
                 return <RoverCard key={rover.id} rover={rover} selected={selectedRoverId === rover.id} compatible={compatibility.ok} reason={compatibility.ok ? undefined : compatibility.reason} onSelect={() => setSelectedRoverId(rover.id)} />
               })}
+            </div>
+            <div className={`workshop-card ${cargoUpgradeInstalled ? 'is-installed' : ''}`}>
+              <span className="workshop-card__icon">{cargoUpgradeInstalled ? <Check size={18} /> : <PackagePlus size={18} />}</span>
+              <span className="workshop-card__copy">
+                <small>МАСТЕРСКАЯ / МУЛ-03</small>
+                <strong>{cargoUpgradeInstalled ? 'Грузовой модуль установлен' : 'Грузовой модуль XL'}</strong>
+                <span>{cargoUpgradeInstalled ? 'Лимит 90 кг · контейнер Кеплера доступен' : cargoUpgradeHint}</span>
+              </span>
+              {cargoUpgradeInstalled ? (
+                <span className="workshop-card__installed">ГОТОВО</span>
+              ) : (
+                <button onClick={handleCargoUpgrade} disabled={!cargoUpgradeAvailable}>
+                  {!cargoUpgradeAffordable ? <LockKeyhole size={13} /> : null}
+                  600 кр.
+                </button>
+              )}
             </div>
           </section>
 
