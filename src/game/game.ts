@@ -2,6 +2,7 @@ export type RoverStatus = 'available' | 'en-route' | 'damaged'
 export type OrderStatus = 'available' | 'in-transit' | 'delivered' | 'failed'
 export type DeliveryStatus = 'en-route' | 'success' | 'failed'
 export type RiskLevel = 'low' | 'medium' | 'high'
+export type RouteMode = 'economy' | 'rapid' | 'cautious'
 
 export interface MapPoint {
   x: number
@@ -53,6 +54,8 @@ export interface Delivery {
   duration: number
   energyCost: number
   risk: number
+  routeMode?: RouteMode
+  reward?: number
 }
 
 export interface GameEvent {
@@ -83,6 +86,7 @@ export interface MissionEstimate {
   duration: number
   risk: number
   loadRatio: number
+  reward: number
 }
 
 export type LaunchCheck = { ok: true; estimate: MissionEstimate } | { ok: false; reason: string }
@@ -91,6 +95,18 @@ const RISK_VALUES: Record<RiskLevel, number> = {
   low: 4,
   medium: 10,
   high: 18,
+}
+
+const ROUTE_MODIFIERS: Record<RouteMode, {
+  energy: number
+  duration: number
+  riskMultiplier: number
+  riskBonus: number
+  reward: number
+}> = {
+  economy: { energy: 0.78, duration: 1.32, riskMultiplier: 1, riskBonus: 0, reward: 1 },
+  rapid: { energy: 1.22, duration: 0.72, riskMultiplier: 1, riskBonus: 6, reward: 1.1 },
+  cautious: { energy: 1.06, duration: 1.2, riskMultiplier: 0.62, riskBonus: 0, reward: 0.85 },
 }
 
 const INITIAL_ZONES: Zone[] = [
@@ -188,20 +204,23 @@ export function createInitialGame(): GameState {
   }
 }
 
-export function calculateMission(rover: Rover, order: Order, zones: Zone[]): MissionEstimate {
+export function calculateMission(rover: Rover, order: Order, zones: Zone[], routeMode: RouteMode = 'economy'): MissionEstimate {
   const zone = zones.find((item) => item.id === order.zoneId)
   if (!zone) throw new Error(`Unknown zone: ${order.zoneId}`)
 
+  const mode = ROUTE_MODIFIERS[routeMode]
   const loadRatio = order.weight / rover.capacity
   const weightPenalty = 1 + loadRatio * 0.72
-  const energyCost = Math.ceil(order.distance * zone.energyMultiplier * weightPenalty * 2.15)
-  const duration = Math.ceil(order.distance * zone.speedMultiplier * (1 + loadRatio * 0.58))
-  const risk = Math.min(85, Math.round(RISK_VALUES[order.risk] + zone.riskBonus + loadRatio * 10))
+  const baseRisk = RISK_VALUES[order.risk] + zone.riskBonus + loadRatio * 10
+  const energyCost = Math.ceil(order.distance * zone.energyMultiplier * weightPenalty * 2.15 * mode.energy)
+  const duration = Math.ceil(order.distance * zone.speedMultiplier * (1 + loadRatio * 0.58) * mode.duration)
+  const risk = Math.min(85, Math.max(1, Math.round(baseRisk * mode.riskMultiplier + mode.riskBonus)))
+  const reward = Math.round(order.reward * mode.reward)
 
-  return { energyCost, duration, risk, loadRatio }
+  return { energyCost, duration, risk, loadRatio, reward }
 }
 
-export function canLaunchMission(game: GameState, roverId: string, orderId: string): LaunchCheck {
+export function canLaunchMission(game: GameState, roverId: string, orderId: string, routeMode: RouteMode = 'economy'): LaunchCheck {
   const rover = game.rovers.find((item) => item.id === roverId)
   const order = game.orders.find((item) => item.id === orderId)
 
@@ -214,7 +233,7 @@ export function canLaunchMission(game: GameState, roverId: string, orderId: stri
     return { ok: false, reason: `Груз тяжелее лимита ровера на ${order.weight - rover.capacity} кг` }
   }
 
-  const estimate = calculateMission(rover, order, game.zones)
+  const estimate = calculateMission(rover, order, game.zones, routeMode)
   if (estimate.energyCost > rover.battery) {
     return { ok: false, reason: `Нужно ${estimate.energyCost}% заряда, доступно ${rover.battery}%` }
   }
@@ -222,8 +241,8 @@ export function canLaunchMission(game: GameState, roverId: string, orderId: stri
   return { ok: true, estimate }
 }
 
-export function launchMission(game: GameState, roverId: string, orderId: string, now = Date.now()): GameState {
-  const check = canLaunchMission(game, roverId, orderId)
+export function launchMission(game: GameState, roverId: string, orderId: string, now = Date.now(), routeMode: RouteMode = 'economy'): GameState {
+  const check = canLaunchMission(game, roverId, orderId, routeMode)
   if (!check.ok) throw new Error(check.reason)
 
   const next = clone(game)
@@ -241,6 +260,8 @@ export function launchMission(game: GameState, roverId: string, orderId: string,
     duration: check.estimate.duration,
     energyCost: check.estimate.energyCost,
     risk: check.estimate.risk,
+    routeMode,
+    reward: check.estimate.reward,
   })
   next.events.unshift(event(next.day, 'info', `${rover.name} вышел к точке «${order.station}».`))
   return next
@@ -270,10 +291,11 @@ export function completeMission(game: GameState, delivery: Delivery, randomValue
   } else {
     rover.status = 'available'
     order.status = 'delivered'
-    next.credits += order.reward
-    next.score += order.reward + order.urgency * 35
+    const reward = delivery.reward ?? order.reward
+    next.credits += reward
+    next.score += reward + order.urgency * 35
     next.rating = Math.min(100, next.rating + 1)
-    next.events.unshift(event(next.day, 'success', `${order.station} получил груз. +${order.reward} кр., батарея ${rover.battery}%.`))
+    next.events.unshift(event(next.day, 'success', `${order.station} получил груз. +${reward} кр., батарея ${rover.battery}%.`))
   }
 
   return next

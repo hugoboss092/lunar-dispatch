@@ -76,6 +76,31 @@ describe('mission planning', () => {
     expect(risky.risk).toBeGreaterThan(safe.risk)
     expect(risky.duration).toBeGreaterThan(safe.duration)
   })
+
+  it('makes economy mode consume less energy but take longer than rapid mode', () => {
+    const game = createInitialGame()
+    const rover = game.rovers.find((item) => item.id === 'rover-atlas')!
+    const order = game.orders.find((item) => item.id === 'order-shackleton')!
+
+    const economy = calculateMission(rover, order, game.zones, 'economy')
+    const rapid = calculateMission(rover, order, game.zones, 'rapid')
+
+    expect(economy.energyCost).toBeLessThan(rapid.energyCost)
+    expect(economy.duration).toBeGreaterThan(rapid.duration)
+    expect(rapid.risk).toBeGreaterThan(economy.risk)
+  })
+
+  it('makes cautious mode safer in exchange for a smaller reward', () => {
+    const game = createInitialGame()
+    const rover = game.rovers.find((item) => item.id === 'rover-atlas')!
+    const order = game.orders.find((item) => item.id === 'order-peak')!
+
+    const rapid = calculateMission(rover, order, game.zones, 'rapid')
+    const cautious = calculateMission(rover, order, game.zones, 'cautious')
+
+    expect(cautious.risk).toBeLessThan(rapid.risk)
+    expect(cautious.reward).toBeLessThan(order.reward)
+  })
 })
 
 describe('delivery completion', () => {
@@ -132,6 +157,31 @@ describe('delivery completion', () => {
     expect(result.rovers.find((item) => item.id === rover.id)?.status).toBe('damaged')
     expect(result.events[0].kind).toBe('danger')
   })
+
+  it('pays the reduced calculated reward for a cautious delivery', () => {
+    const game = createInitialGame()
+    const rover = game.rovers.find((item) => item.id === 'rover-atlas')!
+    const order = game.orders.find((item) => item.id === 'order-shackleton')!
+    const estimate = calculateMission(rover, order, game.zones, 'cautious')
+    const delivery: Delivery = {
+      id: 'delivery-cautious',
+      roverId: rover.id,
+      orderId: order.id,
+      routeMode: 'cautious',
+      status: 'en-route',
+      progress: 100,
+      startedAt: 0,
+      duration: estimate.duration,
+      energyCost: estimate.energyCost,
+      risk: estimate.risk,
+      reward: estimate.reward,
+    }
+
+    const result = completeMission(game, delivery, 0.99)
+
+    expect(result.credits).toBe(game.credits + estimate.reward)
+    expect(result.events[0].message).toContain(`+${estimate.reward} кр.`)
+  })
 })
 
 describe('game loop', () => {
@@ -143,6 +193,14 @@ describe('game loop', () => {
     expect(result.rovers.find((item) => item.id === 'rover-atlas')?.status).toBe('en-route')
     expect(result.orders.find((item) => item.id === 'order-shackleton')?.status).toBe('in-transit')
     expect(result.events[0].kind).toBe('info')
+  })
+
+  it('stores the selected route mode and its calculated payout on launch', () => {
+    const game = createInitialGame()
+    const result = launchMission(game, 'rover-atlas', 'order-shackleton', 1000, 'rapid')
+
+    expect(result.deliveries[0].routeMode).toBe('rapid')
+    expect(result.deliveries[0].reward).toBeGreaterThan(game.orders[0].reward)
   })
 
   it('progresses active deliveries and resolves completed ones', () => {

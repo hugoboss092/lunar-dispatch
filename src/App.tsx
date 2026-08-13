@@ -10,11 +10,14 @@ import {
   Crosshair,
   Flag,
   Gauge,
+  Leaf,
   LockKeyhole,
   PackagePlus,
   RotateCcw,
+  Rocket,
   Route,
   ShieldAlert,
+  ShieldCheck,
   Star,
   Truck,
   Weight,
@@ -31,6 +34,7 @@ import {
   type GameState,
   type Order,
   type RiskLevel,
+  type RouteMode,
   type Rover,
 } from './game/game'
 import { clearGame, loadGame, saveGame } from './game/storage'
@@ -40,6 +44,18 @@ const RISK_LABELS: Record<RiskLevel, string> = {
   medium: 'средний',
   high: 'высокий',
 }
+
+const ROUTE_MODE_LABELS: Record<RouteMode, string> = {
+  economy: 'Экономичный',
+  rapid: 'Быстрый',
+  cautious: 'Осторожный',
+}
+
+const ROUTE_MODES: Array<{ id: RouteMode; detail: string }> = [
+  { id: 'economy', detail: '−22% расход · +32% время' },
+  { id: 'rapid', detail: '−28% время · +10% награда' },
+  { id: 'cautious', detail: '−38% риск · −15% награда' },
+]
 
 const BASE = { x: 48, y: 50 }
 
@@ -184,21 +200,28 @@ function RoverCard({ rover, selected, compatible, reason, onSelect }: {
   )
 }
 
+function RouteModeIcon({ mode }: { mode: RouteMode }) {
+  if (mode === 'rapid') return <Rocket size={16} />
+  if (mode === 'cautious') return <ShieldCheck size={16} />
+  return <Leaf size={16} />
+}
+
 function App() {
   const [game, setGame] = useState<GameState>(() => loadGame())
   const [selectedOrderId, setSelectedOrderId] = useState(() => game.orders.find((item) => item.status === 'available')?.id ?? game.orders[0].id)
   const [selectedRoverId, setSelectedRoverId] = useState(() => game.rovers.find((item) => item.status === 'available')?.id ?? game.rovers[0].id)
+  const [routeMode, setRouteMode] = useState<RouteMode>('economy')
   const [showBriefing, setShowBriefing] = useState(true)
 
   const selectedOrder = game.orders.find((item) => item.id === selectedOrderId) ?? game.orders[0]
   const selectedRover = game.rovers.find((item) => item.id === selectedRoverId) ?? game.rovers[0]
   const launchCheck = useMemo(
-    () => canLaunchMission(game, selectedRover.id, selectedOrder.id),
-    [game, selectedOrder.id, selectedRover.id],
+    () => canLaunchMission(game, selectedRover.id, selectedOrder.id, routeMode),
+    [game, routeMode, selectedOrder.id, selectedRover.id],
   )
   const estimate = useMemo(
-    () => calculateMission(selectedRover, selectedOrder, game.zones),
-    [game.zones, selectedOrder, selectedRover],
+    () => calculateMission(selectedRover, selectedOrder, game.zones, routeMode),
+    [game.zones, routeMode, selectedOrder, selectedRover],
   )
   const currentZone = game.zones.find((item) => item.id === selectedOrder.zoneId)!
   const deliveredCount = game.orders.filter((item) => item.status === 'delivered').length
@@ -220,7 +243,7 @@ function App() {
 
   function handleLaunch() {
     if (!launchCheck.ok) return
-    setGame((current) => launchMission(current, selectedRover.id, selectedOrder.id))
+    setGame((current) => launchMission(current, selectedRover.id, selectedOrder.id, Date.now(), routeMode))
   }
 
   function handleNextDay() {
@@ -233,6 +256,7 @@ function App() {
     setGame(fresh)
     setSelectedOrderId(fresh.orders[0].id)
     setSelectedRoverId(fresh.rovers[0].id)
+    setRouteMode('economy')
     setShowBriefing(true)
   }
 
@@ -308,7 +332,7 @@ function App() {
             <div className="section-title"><span>02</span><h3>Назначьте ровер</h3><small>{game.rovers.filter((item) => item.status === 'available').length} свободно</small></div>
             <div className="rovers-list">
               {game.rovers.map((rover) => {
-                const compatibility = canLaunchMission(game, rover.id, selectedOrder.id)
+                const compatibility = canLaunchMission(game, rover.id, selectedOrder.id, routeMode)
                 return <RoverCard key={rover.id} rover={rover} selected={selectedRoverId === rover.id} compatible={compatibility.ok} reason={compatibility.ok ? undefined : compatibility.reason} onSelect={() => setSelectedRoverId(rover.id)} />
               })}
             </div>
@@ -340,10 +364,27 @@ function App() {
             </div>
             <div className="terrain-note"><span style={{ background: currentZone.color }} /><p><strong>{currentZone.name}</strong>{currentZone.label}: скорость ×{currentZone.speedMultiplier}, расход ×{currentZone.energyMultiplier}</p></div>
 
+            <div className="route-tactics">
+              <div className="route-tactics__heading"><strong>Тактика маршрута</strong><span>выберите компромисс</span></div>
+              <div className="route-modes" role="group" aria-label="Тактика маршрута">
+                {ROUTE_MODES.map((mode) => (
+                  <button
+                    key={mode.id}
+                    className={routeMode === mode.id ? 'is-selected' : ''}
+                    aria-pressed={routeMode === mode.id}
+                    onClick={() => setRouteMode(mode.id)}
+                  >
+                    <RouteModeIcon mode={mode.id} />
+                    <span><strong>{ROUTE_MODE_LABELS[mode.id]}</strong><small>{mode.detail}</small></span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
             {!launchCheck.ok ? (
               <div className="launch-warning"><AlertTriangle size={18} /><span><strong>Маршрут заблокирован</strong>{launchCheck.reason}</span></div>
             ) : (
-              <div className="launch-ready"><Zap size={17} /><span>Ровер вернётся с зарядом {selectedRover.battery - launchCheck.estimate.energyCost}%</span></div>
+              <div className="launch-ready"><Zap size={17} /><span>Останется {selectedRover.battery - launchCheck.estimate.energyCost}% заряда · выплата {formatNumber(launchCheck.estimate.reward)} кр.</span></div>
             )}
 
             <button className="launch-button" disabled={!launchCheck.ok || gameOver} onClick={handleLaunch}>
@@ -359,7 +400,7 @@ function App() {
           {activeCount === 0 ? <p className="empty-state">Нет роверов на маршруте. Выберите заказ на карте.</p> : game.deliveries.filter((item) => item.status === 'en-route').map((delivery) => {
             const rover = game.rovers.find((item) => item.id === delivery.roverId)!
             const order = game.orders.find((item) => item.id === delivery.orderId)!
-            return <div className="active-delivery" key={delivery.id}><span style={{ '--rover-color': rover.color } as React.CSSProperties}><Truck size={18} /></span><div><strong>{rover.name} → {order.station}</strong><small>в пути · риск {delivery.risk}%</small><div><i style={{ width: `${delivery.progress}%` }} /></div></div><b>{delivery.progress}%</b></div>
+            return <div className="active-delivery" key={delivery.id}><span style={{ '--rover-color': rover.color } as React.CSSProperties}><Truck size={18} /></span><div><strong>{rover.name} → {order.station}</strong><small>{ROUTE_MODE_LABELS[delivery.routeMode ?? 'economy']} · риск {delivery.risk}%</small><div><i style={{ width: `${delivery.progress}%` }} /></div></div><b>{delivery.progress}%</b></div>
           })}
         </div>
 
